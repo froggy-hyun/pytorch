@@ -1965,6 +1965,20 @@ def get_input_idxs_to_check(
     return ids_to_check
 
 
+_device_cudagraphify_registry: dict[str, Callable[..., Any]] = {}
+
+
+def register_device_cudagraphify(device_type: str, fn: Callable[..., Any]) -> None:
+    """Register a device-specific cudagraphify implementation.
+
+    Backends can call this to provide their own graph capture function
+    (e.g., ``npugraphify`` for NPU). When ``cudagraphify`` is invoked
+    with a matching ``device_type``, the registered function is called
+    instead of the default CUDA implementation.
+    """
+    _device_cudagraphify_registry[device_type] = fn
+
+
 def cudagraphify(
     model: Callable[..., Any],
     static_input_idxs: Sequence[int] = (),
@@ -1978,7 +1992,22 @@ def cudagraphify(
     mutated_input_idxs: tuple[int, ...] = (),
     kernel_free_cudagraph: bool = False,
     user_visible_output_idxs: tuple[int, ...] = (),
+    device_type: str = "cuda",
 ) -> Callable[..., Any]:
+    registered_fn = _device_cudagraphify_registry.get(device_type)
+    if registered_fn is not None:
+        return registered_fn(
+            model,
+            static_input_idxs=static_input_idxs,
+            device_index=device_index,
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=constants,
+            placeholders=placeholders,
+            mutated_input_idxs=mutated_input_idxs,
+        )
+
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
     )

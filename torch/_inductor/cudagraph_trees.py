@@ -392,9 +392,32 @@ def get_container(device_index: int) -> TreeManagerContainer:
         return container_dict[device_index]
 
 
+_device_manager_registry: dict[str, Callable[..., Any]] = {}
+
+
+def register_device_manager_factory(
+    device_type: str, fn: Callable[..., Any]
+) -> None:
+    """Register a device-specific manager factory.
+
+    Backends can call this to provide their own ``get_manager``
+    implementation (e.g., NPU registers its NPUGraphTreeManager
+    factory). When ``get_manager`` is called with a matching
+    ``device_type``, the registered factory is used instead of the
+    default CUDA implementation.
+    """
+    _device_manager_registry[device_type] = fn
+
+
 def get_manager(
-    device_index: int, create_if_none_exists: bool = True
+    device_index: int,
+    create_if_none_exists: bool = True,
+    *,
+    device_type: str = "cuda",
 ) -> CUDAGraphTreeManager | None:
+    registered_fn = _device_manager_registry.get(device_type)
+    if registered_fn is not None:
+        return registered_fn(device_index, create_if_none_exists)
     if create_if_none_exists:
         return get_container(device_index).get_tree_manager()
     return get_container(device_index).tree_manager
